@@ -1,0 +1,17 @@
+# systemd unit file for the Python Demo Service
+
+
+[Unit]
+# Human readable name of the unit
+Description=Airthings Wave+ MQTT connector - Bluettoth recovery
+
+[Service]
+Type=oneshot
+
+# Command to execute when the service is started
+ExecStart=/home/pi/airthings-mqtt/contrib/airthings-recovery.sh
+
+#allow BTLE scan as non root user
+ExecStartPre=-setcap 'cap_net_raw,cap_net_admin+eip' /usr/local/lib/python3.*/dist-packages/bluepy/bluepy-helper
+
+

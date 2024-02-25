@@ -1,0 +1,31 @@
+[MQTT]
+<<<<<<< HEAD
+TOPIC = speaker_living
+=======
+TOPIC = airthings_living
+>>>>>>> 423044c (Initial commit)
+SERVER = 192.168.1.1
+PORT = 1883
+QOS = 1
+TIMEOUT = 5
+USER = mqttuser
+PASS = mqttpass
+
+<<<<<<< HEAD
+[GPIO]
+#raspberry PINs
+POWER =  13
+VOL_UP = 6
+VOL_DW = 19
+BT_LED = 16
+AUX_LED = 12
+
+[SPEAKER]
+MAX_VOLUME = 30
+DEF_VOLUME = 15
+INIT_VOLUME = 25
+=======
+[AIRTHINGS]
+SERIAL = 2930000000
+
+>>>>>>> 423044c (Initial commit)
