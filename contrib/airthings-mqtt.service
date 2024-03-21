@@ -4,13 +4,15 @@
 [Unit]
 # Human readable name of the unit
 Description=Airthings Wave+ MQTT connector
+
 # Start service after the network is up
 After=network-online.target
 Wants=network-online.target
-StartLimitIntervalSec=30
-StartLimitBurst=3
-OnFailure=airthings-recovery.service
-#FailureAction=reboot
+
+# Restart
+StartLimitIntervalSec=1800
+StartLimitBurst=5
+#OnFailure=airthings-mqtt-recovery.service
 
 
 
@@ -22,6 +24,11 @@ ExecStart=/home/pi/airthings-mqtt/airthings-mqtt.py
 
 WorkingDirectory=/home/pi/airthings-mqtt
 
+# Make sure the /run/airthings directory exists
+RuntimeDirectory=airthings
+RuntimeDirectoryMode=0777
+RuntimeDirectoryPreserve=yes
+
 # Disable Python's buffering of STDOUT and STDERR, so that output from the
 # service shows up immediately in systemd's logs
 Environment=PYTHONUNBUFFERED=1
@@ -31,6 +38,8 @@ Restart=on-failure
 
 # Use a dedicated user to run our service
 User=pi
+Group=pi
+
 
 
 [Install]

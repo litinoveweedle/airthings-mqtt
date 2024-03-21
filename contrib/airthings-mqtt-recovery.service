@@ -1,0 +1,9 @@
+Description=Airthings Wave+ MQTT connector Fail Recovery service
+# Reboot on failure
+FailureAction=reboot
+
+[Service]
+Type=oneshot
+
+ExecStart=/home/pi/airthings-mqtt/airthings-mqtt-recovery.sh
+
