@@ -12,4 +12,4 @@ SERIAL = 2930000000
 
 [RUNTIME]
 MAX_ERROR = 15
-STATE_FILE = /run/airthings/airthings.lock
+STATE_FILE = /run/airthings/airthings.state

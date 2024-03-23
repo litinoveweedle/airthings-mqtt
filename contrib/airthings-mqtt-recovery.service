@@ -1,3 +1,4 @@
+[Unit]
 Description=Airthings Wave+ MQTT connector Fail Recovery service
 # Reboot on failure
 FailureAction=reboot

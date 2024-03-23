@@ -8,19 +8,22 @@ then
 else
     echo 'Sending email to notify about airthings-mqtt service failure.'
     echo "Subject: airthings-mqtt service is down" | sendmail -v root
- 
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/local/lib/python3.*/dist-packages/bluepy/bluepy-helper
+
     /bin/hciconfig hci0 down
     systemctl stop bluetooth
     systemctl stop hciuart
-    /sbin/rmmod btusb
+    lsmod | grep -q btusb
+    if [ $? -eq 0 ]
+    then
+        /sbin/rmmod btusb
+    fi
     /sbin/modprobe btusb
     systemctl start hciuart 2>/dev/null
     systemctl start bluetooth
     sleep 5
     /bin/hciconfig hci0 up
 
-    systemctl reset-failed eneby-mqtt.service
-    systemctl restart eneby-mqtt.service
+    systemctl reset-failed airthings-mqtt.service
+    systemctl restart airthings-mqtt.service
     exit 0
 fi
