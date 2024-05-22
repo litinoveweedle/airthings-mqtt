@@ -127,7 +127,7 @@ def on_disconnect(client, userdata, rc):
 def on_message(client, userdata, msg):
     topic = str(msg.topic)
     payload = str(msg.payload.decode("utf-8"))
-    match = re.match(r'^' + config['MQTT']['TOPIC'] + '\/cmnd\/(state|POWER|VOLUME)$', topic)
+    match = re.match(r'^' + config['MQTT']['TOPIC'] + '\/cmnd\/(state)$', topic)
     if match:
         topic = match.group(1)
         if topic == "state" and payload == "":
