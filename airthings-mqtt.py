@@ -1,99 +1,156 @@
 #! /usr/bin/python
 
 from airthings import WavePlus, Sensors
+import logging
 import paho.mqtt.client as mqtt
 import configparser
-import operator
 import json
 import time
 import uptime
 import datetime
-import os
+import re
 import sys
+import traceback
+from typing import Any
+
 
 # define user-defined exception
 class AppError(Exception):
-    "Raised on aplication error"
+    "Raised on application error"
+
     pass
 
-class MqttConnect(Exception):
+
+class MqttError(Exception):
     "Raised on MQTT connection failure"
+
     pass
+
+
+# Setup logging
+logging.basicConfig(
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    level=logging.INFO,
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
 
 # global variables
-state = { "Time": 0, "Uptime": 0 }
+state = {"Time": 0, "Uptime": 0}
 
 # read config
 config = configparser.ConfigParser()
-config.read('config.ini')
-if 'MQTT' in config:
-    for key in [ 'TOPIC', 'SERVER', 'PORT', 'QOS', 'TIMEOUT', 'USER', 'PASS']:
-        if not config['MQTT'][key]:
-            print("Missing or empty config entry MQTT/" + key)
-            raise("Missing or empty config entry MQTT/" + key)
-else:
-    print("Missing config section MQTT")  
-    raise("Missing config section MQTT")  
+config.read("config.ini")
 
-if 'AIRTHINGS' in config:
-    for key in [ 'SERIAL']:
-        if not config['AIRTHINGS'][key]:
-            print("Missing or empty config entry AIRTHINGS/" + key)
-            raise("Missing or empty config entry AIRTHINGS/" + key)
+if "LOGGING" in config:
+    if "LEVEL" in config["LOGGING"] and config["LOGGING"]["LEVEL"]:
+        log_level = config["LOGGING"]["LEVEL"].upper()
+        if log_level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
+            logger.setLevel(getattr(logging, log_level))
+        else:
+            raise AppError("Invalid logging level " + config["LOGGING"]["LEVEL"])
 else:
-    print("Missing config section AIRTHINGS")
-    raise("Missing config section AIRTHINGS")
+    logger.error("Missing config section LOGGING")
+    raise AppError("Missing config section LOGGING")
 
-if 'RUNTIME' in config:
-    for key in [ 'MAX_ERROR', 'STATE_FILE']:
-        if not config['RUNTIME'][key]:
+if "MQTT" in config:
+    for key in [
+        "TOPIC",
+        "SERVER",
+        "PORT",
+        "QOS",
+        "TIMEOUT",
+        "USER",
+        "PASS",
+        "BIRTH_TOPIC",
+    ]:
+        if not config["MQTT"][key]:
+            logger.error("Missing or empty config entry MQTT/" + key)
+            raise AppError("Missing or empty config entry MQTT/" + key)
+else:
+    logger.error("Missing config section MQTT")
+    raise AppError("Missing config section MQTT")
+
+if "AIRTHINGS" in config:
+    for key in ["SERIAL"]:
+        if not config["AIRTHINGS"][key]:
+            logger.error("Missing or empty config entry AIRTHINGS/" + key)
+            raise AppError("Missing or empty config entry AIRTHINGS/" + key)
+else:
+    logger.error("Missing config section AIRTHINGS")
+    raise AppError("Missing config section AIRTHINGS")
+
+if "RUNTIME" in config:
+    for key in ["MAX_ERROR", "RESTART_DELAY", "TELE_INTERVAL"]:
+        if not config["RUNTIME"][key]:
+            logger.error("Missing or empty config entry RUNTIME/" + key)
             raise AppError("Missing or empty config entry RUNTIME/" + key)
 else:
+    logger.error("Missing config section RUNTIME")
     raise AppError("Missing config section RUNTIME")
-
-
-def airthings_tele(mode):
-    global lasttele
-    global airthings
-    now = time.time()
-    if mode or now - lasttele > 300:
-        # connect to device
-        if not airthings.connect():
-            print("Not connected to Airthing")
-            return False
-
-        # read values
-        sensors = airthings.read()
-        if not sensors:
-            print("Failed to read values")
-            return False
-
-        # extract values
-        state["humidity"] = str(sensors.getValue('HUMIDITY'))
-        state["radon_st_avg"] = str(sensors.getValue('RADON_SHORT_TERM_AVG'))
-        state["radon_lt_avg"] = str(sensors.getValue('RADON_LONG_TERM_AVG'))
-        state["temperature"] = str(sensors.getValue('TEMPERATURE'))
-        state["pressure"] = str(sensors.getValue('REL_ATM_PRESSURE'))
-        state["CO2_lvl"] = str(sensors.getValue('CO2_LVL'))
-        state["VOC_lvl"] = str(sensors.getValue('VOC_LVL'))
-
-        get_time()
-        client.publish(config['MQTT']['TOPIC'] + '/tele/STATE', json.dumps(state), int(config['MQTT']['QOS']))
-        lasttele = now
-        
-        # disconnect device
-        airthings.disconnect()
-    return True
 
 
 def airthings_init():
     global airthings
 
     # Initialize Airthings
-    airthings = WavePlus(int(config['AIRTHINGS']['SERIAL']))
+    airthings = WavePlus(int(config["AIRTHINGS"]["SERIAL"]))
 
     # Subscribe for cmnd events
-    client.subscribe(config['MQTT']['TOPIC'] + '/cmnd/+', int(config['MQTT']['QOS']))
+    client.subscribe(config["MQTT"]["TOPIC"] + "/cmnd/+", int(config["MQTT"]["QOS"]))
+
+    airthings_tele(1)
+
+    # Subscribe for Home Assistant birth messages
+    if config["MQTT"]["BIRTH_TOPIC"]:
+        client.subscribe(config["MQTT"]["BIRTH_TOPIC"])
+
+
+def airthings_tele(mode):
+    global last_tele
+    global airthings
+    now = time.time()
+
+    if mode == 1 or now - last_tele > int(config["RUNTIME"]["TELE_INTERVAL"]):
+        # Sent LWT update
+        client.publish(
+            config["MQTT"]["TOPIC"] + "/tele/LWT", payload="Online", qos=0, retain=True
+        )
+
+        # connect to device
+        if not airthings.connect():
+            logger.error("Not connected to Airthing")
+            raise AppError("Not connected to Airthing")
+
+        # read values
+        sensors = airthings.read()
+        if not sensors:
+            logger.error("Failed to read values")
+            raise AppError("Failed to read values")
+
+        # disconnect device
+        airthings.disconnect()
+
+        # extract values
+        state["humidity"] = str(sensors.getValue("HUMIDITY"))
+        state["radon_st_avg"] = str(sensors.getValue("RADON_SHORT_TERM_AVG"))
+        state["radon_lt_avg"] = str(sensors.getValue("RADON_LONG_TERM_AVG"))
+        state["temperature"] = str(sensors.getValue("TEMPERATURE"))
+        state["pressure"] = str(sensors.getValue("REL_ATM_PRESSURE"))
+        state["CO2_lvl"] = str(sensors.getValue("CO2_LVL"))
+        state["VOC_lvl"] = str(sensors.getValue("VOC_LVL"))
+
+        get_time()
+        client.publish(
+            config["MQTT"]["TOPIC"] + "/tele/STATE",
+            json.dumps(state),
+            int(config["MQTT"]["QOS"]),
+        )
+        last_tele = now
+        return True
+    else:
+        return False
 
 
 def get_time():
@@ -103,117 +160,161 @@ def get_time():
     time = time % 86400
     result = result + "T" + "%02d" % (int(time / 3600))
     time = time % 3600
-    state["Uptime"] = result + ":" + "%02d" % (int(time / 60)) + ":" + "%02d" % (time % 60)
+    state["Uptime"] = (
+        result + ":" + "%02d" % (int(time / 60)) + ":" + "%02d" % (time % 60)
+    )
     state["Time"] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
-# The callback for when the client receives a CONNACK response from the server.
-def on_connect(client, userdata, flags, rc):
-    if rc != 0:
-        print('MQTT unexpected connect return code ' + str(rc))
+def mqtt_init() -> None:
+    global client
+
+    # Create mqtt client
+    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    # Register LWT message
+    client.will_set(
+        config["MQTT"]["TOPIC"] + "/tele/LWT", payload="Offline", qos=0, retain=True
+    )
+    # Register connect callback
+    client.on_connect = mqtt_on_connect
+    # Register disconnect callback
+    client.on_disconnect = mqtt_on_disconnect
+    # Register publish message callback
+    client.on_message = mqtt_on_message
+    # Set access token
+    client.username_pw_set(config["MQTT"]["USER"], config["MQTT"]["PASS"])
+    # Run receive thread
+    client.loop_start()
+    # Connect to broker
+    client.connect(
+        config["MQTT"]["SERVER"],
+        int(config["MQTT"]["PORT"]),
+        int(config["MQTT"]["TIMEOUT"]),
+    )
+
+    timeout = 0
+    reconnect = 0
+    time.sleep(1)
+    while not client.is_connected():
+        time.sleep(1)
+        timeout += 1
+        if timeout > 15:
+            logger.info("MQTT waiting to connect")
+            if reconnect > 10:
+                logger.error("MQTT not connected!")
+                raise MqttError("MQTT not connected!")
+            client.reconnect()
+            reconnect += 1
+            timeout = 0
+
+
+def mqtt_cleanup() -> None:
+    global client
+
+    if client:
+        client.loop_stop()
+        if client.is_connected():
+            # Sent LWT update
+            client.publish(
+                config["MQTT"]["TOPIC"] + "/tele/LWT",
+                payload="Offline",
+                qos=0,
+                retain=True,
+            )
+            client.disconnect()
+        client = None
+
+
+def mqtt_on_connect(
+    client: mqtt.Client,
+    userdata: Any,
+    flags: dict,
+    reason_code: int,
+    properties: mqtt.Properties,
+):
+    if reason_code != 0:
+        logger.error("MQTT unexpected connect return code " + str(reason_code))
     else:
-        print('MQTT client connected')
+        logger.info("MQTT client connected")
         client.connected_flag = 1
 
 
-def on_disconnect(client, userdata, rc):
+def mqtt_on_disconnect(
+    client: mqtt.Client,
+    userdata: Any,
+    flags: dict,
+    reason_code: int,
+    properties: mqtt.Properties,
+):
     client.connected_flag = 0
-    if rc != 0:
-        print('MQTT unexpected disconnect return code ' + str(rc))
-    print('MQTT client disconnected')
+    if reason_code != 0:
+        logger.error("MQTT unexpected disconnect return code " + str(reason_code))
+    logger.info("MQTT client disconnected")
 
 
 # The callback for when a PUBLISH message is received from the server.
-def on_message(client, userdata, msg):
+def mqtt_on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage):
     topic = str(msg.topic)
     payload = str(msg.payload.decode("utf-8"))
-    match = re.match(r'^' + config['MQTT']['TOPIC'] + '\/cmnd\/(state)$', topic)
-    if match:
-        topic = match.group(1)
+
+    tele = re.match(r"^" + config["MQTT"]["TOPIC"] + "/cmnd/(state)$", topic)
+    birth = re.match(r"^" + config["MQTT"]["BIRTH_TOPIC"] + "$", topic)
+
+    if tele:
+        topic = tele.group(1)
         if topic == "state" and payload == "":
             airthings_tele(1)
         else:
-            print("Unknown topic: " + topic + ", message: " + payload)
+            logger.warning("Unknown topic: " + topic + ", message: " + payload)
+    elif birth:
+        if config["MQTT"]["BIRTH_TOPIC"]:
+            if payload.lower() == "online":
+                logger.info("Home Assistant is online")
+                speaker_tele(1)
+            else:
+                logger.info("Home Assistant is " + payload)
     else:
-        print("Unknown topic: " + topic + ", message: " + payload)
+        logger.warning("Unknown topic: " + topic + ", message: " + payload)
 
 
-# touch state file on succesfull run
-def state_file(mode):
-    if mode:
-        if int(config['RUNTIME']['MAX_ERROR']) > 0 and config['RUNTIME']['STATE_FILE']:
-            with open(config['RUNTIME']['STATE_FILE'], 'a'):
-                os.utime(config['RUNTIME']['STATE_FILE'], None)
-    elif os.path.isfile(config['RUNTIME']['STATE_FILE']):
-        os.remove(config['RUNTIME']['STATE_FILE'])
-
-
-# Add connection flags
-mqtt.Client.connected_flag = 0
-mqtt.Client.reconnect_count = 0
-
-
-count = 0
+client = None
+restart = 0
 while True:
     try:
         # Init counters
-        lasttele = 0
+        last_tele = 0
         # Create mqtt client
-        client = mqtt.Client()
-        client.connected_flag = 0
-        client.reconnect_count = 0
-        # Register LWT message
-        client.will_set(config['MQTT']['TOPIC'] + '/tele/LWT', payload="Offline", qos=0, retain=True)
-        # Register connect callback
-        client.on_connect = on_connect
-        # Register disconnect callback
-        client.on_disconnect = on_disconnect
-        # Registed publish message callback
-        client.on_message = on_message
-        # Set access token
-        client.username_pw_set(config['MQTT']['USER'], config['MQTT']['PASS'])
-        # Run receive thread
-        client.loop_start()
-        # Connect to broker
-        client.connect(config['MQTT']['SERVER'], int(config['MQTT']['PORT']), int(config['MQTT']['TIMEOUT']))
-        time.sleep(1)
-        while not client.connected_flag:
-            print("MQTT waiting to connect")
-            client.reconnect_count += 1
-            if client.reconnect_count > 10:
-                print("MQTT restarting connection!")
-                raise("MQTT restarting connection!")
-            time.sleep(1)
-        # Sent LWT update
-        client.publish(config['MQTT']['TOPIC'] + '/tele/LWT',payload="Online", qos=0, retain=True)
+        if not client:
+            # Init mqtt
+            mqtt_init()
         # Init airthings
         airthings_init()
         # Run sending thread
         while True:
-            if client.connected_flag:
-                count = 0
-                airthings_tele(0)
-                state_file(1)
-            else:
-                print("MQTT connection lost!")
-                raise("MQTT connection lost!")
+            airthings_tele(0)
             time.sleep(1)
     except BaseException as error:
-        print("An exception occurred:", type(error).__name__, "–", error)
-        client.loop_stop()
-        del airthings
-        if client.connected_flag:
-            client.unsubscribe(config['MQTT']['TOPIC'] + '/cmnd/+')
-            client.disconnect()
-        del client
-        if type(error) in [ MqttConnect ] and count <= int(config['RUNTIME']['MAX_ERROR']):
-            count = count + 1
-            #Try to reconnect later
-            time.sleep(10)
-        elif type(error) in [ KeyboardInterrupt, SystemExit ]:
-            state_file(0)
-            # Gracefull shutwdown
+        logger.error(f"An exception occurred: {type(error).__name__} – {error}")
+        if type(error) in [MqttError, AppError] and (
+            int(config["RUNTIME"]["MAX_ERROR"]) == 0
+            or restart <= int(config["RUNTIME"]["MAX_ERROR"])
+        ):
+            if type(error) == MqttError:
+                mqtt_cleanup()
+            elif type(error) == AppError:
+                pass
+            restart += 1
+            del airthings
+            # Try to reconnect later
+            time.sleep(int(config["RUNTIME"]["RESTART_DELAY"]))
+        elif type(error) in [KeyboardInterrupt, SystemExit]:
+            # Graceful shutdown
+            logger.error("Gracefully terminating application")
+            mqtt_cleanup()
+            logger.error("Application terminated")
             sys.exit(0)
         else:
-            #Exit with error
+            # Exit with error
+            logger.error(f"Unknown exception, aborting application")
+            logger.debug(f"Exception details: {traceback.format_exc()}")
             sys.exit(1)
