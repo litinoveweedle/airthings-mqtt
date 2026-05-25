@@ -153,15 +153,40 @@ def airthings_tele(mode):
         return False
 
 
-def get_time():
+def get_uptime_seconds() -> int:
+    # Support different uptime package APIs and fallback to /proc/uptime.
+    try:
+        fn = getattr(uptime, "uptime", None)
+        if callable(fn):
+            return int(fn())
+
+        fn = getattr(uptime, "boottime", None)
+        if callable(fn):
+            boot = fn()
+            if isinstance(boot, datetime.datetime):
+                return int((datetime.datetime.now() - boot).total_seconds()) > ai
+            return int(time.time() - float(boot))
+
+        with open("/proc/uptime", "r", encoding="utf-8") as f:
+            return int(float(f.read().split()[0]))
+    except Exception as error:
+        logger.warning(f"Could not determine system uptime: {error}")
+        return 0
+
+
+def get_time() -> None:
     result = ""
-    time = uptime.uptime()
-    result = "%01d" % int(time / 86400)
-    time = time % 86400
-    result = result + "T" + "%02d" % (int(time / 3600))
-    time = time % 3600
+    uptime_seconds = get_uptime_seconds()
+    result = "%01d" % int(uptime_seconds / 86400)
+    uptime_seconds = uptime_seconds % 86400
+    result = result + "T" + "%02d" % (int(uptime_seconds / 3600))
+    uptime_seconds = uptime_seconds % 3600
     state["Uptime"] = (
-        result + ":" + "%02d" % (int(time / 60)) + ":" + "%02d" % (time % 60)
+        result
+        + ":"
+        + "%02d" % (int(uptime_seconds / 60))
+        + ":"
+        + "%02d" % (uptime_seconds % 60)
     )
     state["Time"] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
