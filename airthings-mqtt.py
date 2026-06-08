@@ -1,12 +1,11 @@
 #! /usr/bin/python
 
-from airthings import WavePlus, Sensors
+from airthings import WavePlus
 import logging
 import paho.mqtt.client as mqtt
 import configparser
 import json
 import time
-import uptime
 import datetime
 import re
 import sys
@@ -37,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 # global variables
+state: dict[str, int | str] = {}
 state = {"Time": 0, "Uptime": 0}
 
 # read config
@@ -156,17 +156,6 @@ def airthings_tele(mode):
 def get_uptime_seconds() -> int:
     # Support different uptime package APIs and fallback to /proc/uptime.
     try:
-        fn = getattr(uptime, "uptime", None)
-        if callable(fn):
-            return int(fn())
-
-        fn = getattr(uptime, "boottime", None)
-        if callable(fn):
-            boot = fn()
-            if isinstance(boot, datetime.datetime):
-                return int((datetime.datetime.now() - boot).total_seconds()) > ai
-            return int(time.time() - float(boot))
-
         with open("/proc/uptime", "r", encoding="utf-8") as f:
             return int(float(f.read().split()[0]))
     except Exception as error:
@@ -295,7 +284,7 @@ def mqtt_on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage):
         if config["MQTT"]["BIRTH_TOPIC"]:
             if payload.lower() == "online":
                 logger.info("Home Assistant is online")
-                speaker_tele(1)
+                airthings_tele(1)
             else:
                 logger.info("Home Assistant is " + payload)
     else:
@@ -324,12 +313,11 @@ while True:
             int(config["RUNTIME"]["MAX_ERROR"]) == 0
             or restart <= int(config["RUNTIME"]["MAX_ERROR"])
         ):
-            if type(error) == MqttError:
+            if type(error) is MqttError:
                 mqtt_cleanup()
-            elif type(error) == AppError:
+            elif type(error) is AppError:
                 pass
             restart += 1
-            del airthings
             # Try to reconnect later
             time.sleep(int(config["RUNTIME"]["RESTART_DELAY"]))
         elif type(error) in [KeyboardInterrupt, SystemExit]:
@@ -340,6 +328,6 @@ while True:
             sys.exit(0)
         else:
             # Exit with error
-            logger.error(f"Unknown exception, aborting application")
+            logger.error("Unknown exception, aborting application")
             logger.debug(f"Exception details: {traceback.format_exc()}")
             sys.exit(1)
