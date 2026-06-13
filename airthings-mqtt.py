@@ -195,7 +195,6 @@ def mqtt_init() -> None:
         int(config["MQTT"]["PORT"]),
         int(config["MQTT"]["TIMEOUT"]),
     )
-
     time.sleep(1)
     mqtt_check()
 
@@ -242,11 +241,7 @@ def mqtt_cleanup() -> None:
         client.loop_stop()
         if client.is_connected():
             # Sent LWT update
-            mqtt_publish(
-                "/tele/LWT",
-                payload="Offline",
-                retain=True,
-            )
+            mqtt_publish("/tele/LWT", payload="Offline", retain=True)
             client.disconnect()
         client = None
 
