@@ -97,15 +97,6 @@ def airthings_init():
     # Initialize Airthings
     airthings = WavePlus(int(config["AIRTHINGS"]["SERIAL"]))
 
-    # Subscribe for cmnd events
-    client.subscribe(config["MQTT"]["TOPIC"] + "/cmnd/+", int(config["MQTT"]["QOS"]))
-
-    airthings_tele(1)
-
-    # Subscribe for Home Assistant birth messages
-    if config["MQTT"]["BIRTH_TOPIC"]:
-        client.subscribe(config["MQTT"]["BIRTH_TOPIC"])
-
 
 def airthings_tele(mode):
     global last_tele
@@ -113,10 +104,11 @@ def airthings_tele(mode):
     now = time.time()
 
     if mode == 1 or now - last_tele > int(config["RUNTIME"]["TELE_INTERVAL"]):
+        # Ensure broker connectivity and fail fast if MQTT is unhealthy.
+        mqtt_check()
+
         # Sent LWT update
-        client.publish(
-            config["MQTT"]["TOPIC"] + "/tele/LWT", payload="Online", qos=0, retain=True
-        )
+        mqtt_publish("/tele/LWT", payload="Online", qos=0, retain=True)
 
         # connect to device
         if not airthings.connect():
@@ -142,8 +134,8 @@ def airthings_tele(mode):
         state["VOC_lvl"] = str(sensors.getValue("VOC_LVL"))
 
         get_time()
-        client.publish(
-            config["MQTT"]["TOPIC"] + "/tele/STATE",
+        mqtt_publish(
+            "/tele/STATE",
             json.dumps(state),
             int(config["MQTT"]["QOS"]),
         )
@@ -189,6 +181,8 @@ def mqtt_init() -> None:
     client.will_set(
         config["MQTT"]["TOPIC"] + "/tele/LWT", payload="Offline", qos=0, retain=True
     )
+    # Let auto-reconnect progressively if the link drops.
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
     # Register connect callback
     client.on_connect = mqtt_on_connect
     # Register disconnect callback
@@ -206,20 +200,38 @@ def mqtt_init() -> None:
         int(config["MQTT"]["TIMEOUT"]),
     )
 
-    timeout = 0
-    reconnect = 0
     time.sleep(1)
+    mqtt_check()
+
+
+def mqtt_check() -> None:
+    global client
+
+    if not client:
+        raise MqttError("MQTT client is not initialized")
+    
+    retries = 0
     while not client.is_connected():
-        time.sleep(1)
-        timeout += 1
-        if timeout > 15:
-            logger.info("MQTT waiting to connect")
-            if reconnect > 10:
-                logger.error("MQTT not connected!")
-                raise MqttError("MQTT not connected!")
+        if retries >= 5:
+            raise MqttError("MQTT reconnect failed")
+        logger.warning("MQTT is disconnected, trying to connect")
+        try:
             client.reconnect()
-            reconnect += 1
-            timeout = 0
+        except Exception as error:
+            logger.warning(f"MQTT reconnect attempt failed: {error}")
+        retries += 1
+        time.sleep(1)
+
+
+def mqtt_publish(topic: str, payload: str, qos: int, retain: bool = False) -> None:
+    if not client:
+        raise MqttError("MQTT client is not initialized")
+
+    result = client.publish(config["MQTT"]["TOPIC"] + topic, payload=payload, qos=qos, retain=retain)
+    if result.rc != mqtt.MQTT_ERR_SUCCESS:
+        raise MqttError(
+            f"MQTT publish failed with code {result.rc} on topic {topic}"
+        )
 
 
 def mqtt_cleanup() -> None:
@@ -248,9 +260,17 @@ def mqtt_on_connect(
 ):
     if reason_code != 0:
         logger.error("MQTT unexpected connect return code " + str(reason_code))
+        return
     else:
         logger.info("MQTT client connected")
         client.connected_flag = 1
+
+    # Subscribe for cmnd events
+    client.subscribe(config["MQTT"]["TOPIC"] + "/cmnd/+", int(config["MQTT"]["QOS"]))
+
+    # Subscribe for Home Assistant birth messages
+    if config["MQTT"]["BIRTH_TOPIC"]:
+        client.subscribe(config["MQTT"]["BIRTH_TOPIC"])
 
 
 def mqtt_on_disconnect(

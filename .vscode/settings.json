@@ -4,6 +4,7 @@
         "AIRTHINGS",
         "cmnd",
         "MQTT",
+        "paho",
         "TELE"
     ]
 }
