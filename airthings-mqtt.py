@@ -108,7 +108,7 @@ def airthings_tele(mode):
         mqtt_check()
 
         # Sent LWT update
-        mqtt_publish("/tele/LWT", payload="Online", qos=0, retain=True)
+        mqtt_publish("/tele/LWT", payload="Online", retain=True)
 
         # connect to device
         if not airthings.connect():
@@ -134,11 +134,7 @@ def airthings_tele(mode):
         state["VOC_lvl"] = str(sensors.getValue("VOC_LVL"))
 
         get_time()
-        mqtt_publish(
-            "/tele/STATE",
-            json.dumps(state),
-            int(config["MQTT"]["QOS"]),
-        )
+        mqtt_publish("/tele/STATE", payload=json.dumps(state))
         last_tele = now
         return True
     else:
@@ -209,7 +205,7 @@ def mqtt_check() -> None:
 
     if not client:
         raise MqttError("MQTT client is not initialized")
-    
+
     retries = 0
     while not client.is_connected():
         if retries >= 5:
@@ -223,15 +219,20 @@ def mqtt_check() -> None:
         time.sleep(1)
 
 
-def mqtt_publish(topic: str, payload: str, qos: int, retain: bool = False) -> None:
+def mqtt_publish(
+    topic: str,
+    payload: str,
+    qos: int = int(config["MQTT"]["QOS"]),
+    retain: bool = False,
+) -> None:
     if not client:
         raise MqttError("MQTT client is not initialized")
 
-    result = client.publish(config["MQTT"]["TOPIC"] + topic, payload=payload, qos=qos, retain=retain)
+    result = client.publish(
+        config["MQTT"]["TOPIC"] + topic, payload=payload, qos=qos, retain=retain
+    )
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
-        raise MqttError(
-            f"MQTT publish failed with code {result.rc} on topic {topic}"
-        )
+        raise MqttError(f"MQTT publish failed with code {result.rc} on topic {topic}")
 
 
 def mqtt_cleanup() -> None:
@@ -241,10 +242,9 @@ def mqtt_cleanup() -> None:
         client.loop_stop()
         if client.is_connected():
             # Sent LWT update
-            client.publish(
-                config["MQTT"]["TOPIC"] + "/tele/LWT",
+            mqtt_publish(
+                "/tele/LWT",
                 payload="Offline",
-                qos=0,
                 retain=True,
             )
             client.disconnect()
