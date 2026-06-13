@@ -224,14 +224,26 @@ def mqtt_publish(
     qos: int = int(config["MQTT"]["QOS"]),
     retain: bool = False,
 ) -> None:
-    if not client:
-        raise MqttError("MQTT client is not initialized")
+    global client
 
-    result = client.publish(
-        config["MQTT"]["TOPIC"] + topic, payload=payload, qos=qos, retain=retain
-    )
-    if result.rc != mqtt.MQTT_ERR_SUCCESS:
-        raise MqttError(f"MQTT publish failed with code {result.rc} on topic {topic}")
+    if client and client.is_connected():
+        try:
+            result = client.publish(
+                config["MQTT"]["TOPIC"] + "/" + topic,
+                payload=payload,
+                qos=qos,
+                retain=retain,
+            )
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise MqttError(
+                    f"MQTT publish failed with code {result.rc} on topic {topic}"
+                )
+        except Exception as error:
+            logger.error(f"Failed to publish MQTT message: {error}")
+            raise MqttError(f"Failed to publish MQTT message: {error}")
+    else:
+        logger.error("MQTT not connected!")
+        raise MqttError("MQTT not connected!")
 
 
 def mqtt_cleanup() -> None:
