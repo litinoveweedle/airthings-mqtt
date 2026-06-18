@@ -130,7 +130,7 @@ def airthings_tele(mode):
                 f"An error occurred connecting or reading Airthings: {error}"
             )
         finally:
-            # disconnect device even if connect/read timed out or failed
+            # disconnect device on any BLE failure
             try:
                 airthings.disconnect()
             except Exception as error:
@@ -358,18 +358,18 @@ while True:
             time.sleep(1)
     except BaseException as error:
         logger.error(f"An exception occurred: {type(error).__name__} – {error}")
-        if type(error) in [MqttError, AppError] and (
+        if isinstance(error, (MqttError, AppError)) and (
             int(config["RUNTIME"]["MAX_ERROR"]) == 0
             or restart <= int(config["RUNTIME"]["MAX_ERROR"])
         ):
-            if type(error) is MqttError:
+            if isinstance(error, MqttError):
                 mqtt_cleanup()
-            elif type(error) is AppError:
+            elif isinstance(error, AppError):
                 pass
             restart += 1
             # Try to reconnect later
             time.sleep(int(config["RUNTIME"]["RESTART_DELAY"]))
-        elif type(error) in [KeyboardInterrupt, SystemExit]:
+        elif isinstance(error, (KeyboardInterrupt, SystemExit)):
             # Graceful shutdown
             logger.error("Gracefully terminating application")
             mqtt_cleanup()
