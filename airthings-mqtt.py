@@ -95,7 +95,10 @@ def airthings_init():
     global airthings
 
     # Initialize Airthings
-    airthings = WavePlus(int(config["AIRTHINGS"]["SERIAL"]))
+    airthings = WavePlus(
+        int(config["AIRTHINGS"]["SERIAL"]),
+        timeout=5,
+    )
 
 
 def airthings_tele(mode):
@@ -110,19 +113,28 @@ def airthings_tele(mode):
         # Sent LWT update
         mqtt_publish("/tele/LWT", payload="Online", retain=True)
 
-        # connect to device
-        if not airthings.connect():
-            logger.error("Not connected to Airthing")
-            raise AppError("Not connected to Airthing")
+        try:
+            # connect to device
+            if not airthings.connect():
+                logger.error("Not connected to Airthing")
+                raise AppError("Not connected to Airthing")
 
-        # read values
-        sensors = airthings.read()
-        if not sensors:
-            logger.error("Failed to read values")
-            raise AppError("Failed to read values")
-
-        # disconnect device
-        airthings.disconnect()
+            # read values
+            sensors = airthings.read()
+            if not sensors:
+                logger.error("Failed to read values")
+                raise AppError("Failed to read values")
+        except Exception as error:
+            logger.error(f"An error occurred connecting or reading Airthings: {error}")
+            raise AppError(
+                f"An error occurred connecting or reading Airthings: {error}"
+            )
+        finally:
+            # disconnect device even if connect/read timed out or failed
+            try:
+                airthings.disconnect()
+            except Exception as error:
+                logger.warning(f"Failed to disconnect Airthings cleanly: {error}")
 
         # extract values
         state["humidity"] = str(sensors.getValue("HUMIDITY"))
@@ -173,6 +185,7 @@ def mqtt_init() -> None:
 
     # Create mqtt client
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    client.enable_logger(logger)
     # Register LWT message
     client.will_set(
         config["MQTT"]["TOPIC"] + "/tele/LWT",
@@ -298,7 +311,8 @@ def mqtt_on_disconnect(
     client.connected_flag = 0
     if reason_code != 0:
         logger.error("MQTT unexpected disconnect return code " + str(reason_code))
-    logger.info("MQTT client disconnected")
+    else:
+        logger.info("MQTT client disconnected")
 
 
 # The callback for when a PUBLISH message is received from the server.
