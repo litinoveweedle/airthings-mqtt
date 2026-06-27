@@ -354,7 +354,9 @@ while True:
         airthings_init()
         # Run sending thread
         while True:
-            airthings_tele(0)
+            if airthings_tele(0):
+                # reset restart counter on successful telemetry
+                restart = 0
             time.sleep(1)
     except BaseException as error:
         logger.error(f"An exception occurred: {type(error).__name__} – {error}")
